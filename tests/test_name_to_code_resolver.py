@@ -37,6 +37,10 @@ class TestIsCodeLike:
         assert _is_code_like("920493.BJ") is True
         assert _is_code_like("BJ920493") is True
 
+    def test_bj_exchange_hint_rejects_non_bse_code(self):
+        assert _is_code_like("600519.BJ") is False
+        assert _is_code_like("BJ600519") is False
+
     def test_hk_5_digits(self):
         assert _is_code_like("00700") is True
 
@@ -69,6 +73,10 @@ class TestNormalizeCode:
 
     def test_strips_bse_prefix(self):
         assert _normalize_code("BJ920493") == "920493"
+
+    def test_bj_exchange_hint_rejects_non_bse_code(self):
+        assert _normalize_code("600519.BJ") is None
+        assert _normalize_code("BJ600519") is None
 
     def test_preserves_us_stock(self):
         assert _normalize_code("AAPL") == "AAPL"
