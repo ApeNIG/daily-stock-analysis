@@ -29,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [修复] 大盘复盘“近三日催化线索”改为明确展示摘要片段、来源日期和 URL，避免把搜索摘要截断内容误呈现为完整事件。
 - [新功能] Web 首页新增“大盘复盘”按钮，通过 `POST /api/v1/analysis/market-review` 后台触发复盘并沿用通知配置。
 - [修复] 明确 `POST /api/v1/analysis/market-review` 的配置复用与锁语义：复用现有 Analyzer/SearchService 装配逻辑，仅提供进程内防重，跨实例多容器场景需外部幂等机制；并同步 `full-guide*` 说明与契约测试断言。
-- [文档] 补充 Web/Docker/server 大盘复盘兼容性核验说明：接口与 CLI/Bot 共用 `build_market_review_runtime` 装配路径；在兼容扩展中优先识别 `litellm_model` / `llm_model_list`，未命中时回退到 legacy key，并未新增/调整 provider、模型名、Base URL 或 LiteLLM 运行时语义。新增审计说明：兼容顺序与回退依据以 `Config._load_from_env()` 为准，默认通道优先级为 `LITELLM_CONFIG` > `LLM_CHANNELS` > legacy keys；相关回归见 `tests/test_llm_channel_config.py` 与 `tests/test_market_review_runtime.py`。
+- [文档] 补充市场复盘兼容性核验说明：接口与 CLI/Bot 共用 `build_market_review_runtime` 装配路径，兼容扩展仅做 `litellm_model` / `llm_model_list` 优先识别，再回退 legacy 键，不改 provider、模型名、Base URL 或 LiteLLM 路由语义；官方核验依据为 LiteLLM OpenAI-compatible 路由与 OpenAI/DeepSeek API 文档，且回归与兼容验证以 `requirements.txt` 当前约束 `litellm>=1.80.10,!=1.82.7,!=1.82.8,<2.0.0` 下的 `tests/test_llm_channel_config.py`、`tests/test_market_review_runtime.py`、`tests/test_analysis_api_contract.py` 为准；回退路径为恢复旧 `.env`/桌面导出备份并重启进程，或清空 `LITELLM_CONFIG`、`LLM_CHANNELS` 回退到 legacy `LITELLM_MODEL` / `LITELLM_FALLBACK_MODELS` / `GEMINI_*` / `OPENAI_*` / `ANTHROPIC_*` / `DEEPSEEK_*`。
 - [修复] 完善 Web “大盘复盘”按钮的可观测性：返回 `task_id` 后轮询 `task status`，在进行中/完成/失败场景展示明确反馈；`completed` 且属于大盘复盘时直接返回并展示 `market_review_report` 报告文本，兼容未启用外链文件访问的部署场景。
 - [测试] 补充 `tests/test_market_review_runtime.py` 覆盖“显式 `litellm_model` / `llm_model_list` / legacy key 在大盘复盘装配路径中的识别与回退顺序”回归，确保该功能变更可审计且未触达 provider/base url/litellm 路由语义变更。
 - [改进] 个股报告操作建议增加支撑/压力位与主力资金流校准，减少仅因单日涨跌导致买入/卖出剧烈切换，并补充“震荡观望、洗盘观察”等中性建议。
