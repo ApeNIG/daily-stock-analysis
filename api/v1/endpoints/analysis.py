@@ -872,6 +872,14 @@ def _load_sync_fundamental_sources(
         return None, None
 
 
+def _stringify_report_strategy_value(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
 def _build_analysis_report(
         report_data: Dict[str, Any],
         query_id: str,
@@ -932,10 +940,10 @@ def _build_analysis_report(
     strategy = None
     if strategy_data:
         strategy = ReportStrategy(
-            ideal_buy=strategy_data.get("ideal_buy"),
-            secondary_buy=strategy_data.get("secondary_buy"),
-            stop_loss=strategy_data.get("stop_loss"),
-            take_profit=strategy_data.get("take_profit")
+            ideal_buy=_stringify_report_strategy_value(strategy_data.get("ideal_buy")),
+            secondary_buy=_stringify_report_strategy_value(strategy_data.get("secondary_buy")),
+            stop_loss=_stringify_report_strategy_value(strategy_data.get("stop_loss")),
+            take_profit=_stringify_report_strategy_value(strategy_data.get("take_profit"))
         )
 
     extracted_fundamental = extract_fundamental_detail_fields(
