@@ -83,6 +83,12 @@ Data is automatically saved to host directories:
 - `./logs/` - Log files
 - `./reports/` - Analysis reports
 
+### 6. Permissions
+
+The Docker image startup entrypoint automatically creates and fixes ownership for the mounted `./data`, `./logs`, and `./reports` directories, then drops privileges to the non-root `dsa` user (UID 1000). Normal deployments do not require manual host-side `chown` / `chmod`.
+
+If you explicitly set `--user` / Compose `user:`, or use read-only mounts, rootless Docker, NFS, or another environment that prevents the container from fixing ownership, make sure the actual runtime user can write to these directories.
+
 ---
 
 ## Option 2: Direct Deployment
