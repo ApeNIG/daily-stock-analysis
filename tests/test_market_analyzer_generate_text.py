@@ -907,6 +907,55 @@ Sector text.
         assert "URL: https://example.com/redirect?" in prompt
         assert ("x" * 220) not in prompt
 
+    def test_us_english_review_prompt_omits_a_share_hot_stock_template(self):
+        from src.core.market_profile import US_PROFILE
+        from src.core.market_strategy import get_market_strategy_blueprint
+        from src.market_analyzer import MarketOverview
+
+        ma = self._make_market_analyzer_with_mock_generate_text(return_value="review")
+        ma.config.report_language = "en"
+        ma.region = "us"
+        ma.profile = US_PROFILE
+        ma.strategy = get_market_strategy_blueprint("us")
+
+        prompt = ma._build_review_prompt(
+            MarketOverview(
+                date="2026-05-06",
+                hot_stocks=[{"rank": 1, "code": "AAPL", "name": "Apple"}],
+                limit_up_stocks=[{"code": "AAPL", "name": "Apple"}],
+            ),
+            [],
+        )
+
+        assert "## Hot Stocks and Limit-up Ladder" not in prompt
+        assert "### 5. Hot Stocks & Limit-up Ladder" not in prompt
+        assert "Limit-up" not in prompt
+        assert "### 5. Outlook" in prompt
+
+    def test_hk_chinese_review_prompt_omits_a_share_ladder_template(self):
+        from src.core.market_profile import HK_PROFILE
+        from src.core.market_strategy import get_market_strategy_blueprint
+        from src.market_analyzer import MarketOverview
+
+        ma = self._make_market_analyzer_with_mock_generate_text(return_value="review")
+        ma.region = "hk"
+        ma.profile = HK_PROFILE
+        ma.strategy = get_market_strategy_blueprint("hk")
+
+        prompt = ma._build_review_prompt(
+            MarketOverview(
+                date="2026-05-06",
+                hot_stocks=[{"rank": 1, "code": "00700", "name": "腾讯控股"}],
+                limit_up_stocks=[{"code": "00700", "name": "腾讯控股"}],
+            ),
+            [],
+        )
+
+        assert "## 热门个股与涨停梯队" not in prompt
+        assert "### 四、热门股票与连板" not in prompt
+        assert "涨停" not in prompt
+        assert "### 四、资金与情绪" in prompt
+
     def test_inject_data_adds_hot_stocks_and_limit_up_ladder(self):
         from src.market_analyzer import MarketOverview
 

@@ -1076,6 +1076,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
     def _build_review_prompt(self, overview: MarketOverview, news: List) -> str:
         """构建复盘报告 Prompt"""
         review_language = self._get_review_language()
+        is_a_share_review = self.region == "cn"
 
         # 指数行情信息（简洁格式，不用emoji）
         indices_text = ""
@@ -1088,22 +1089,25 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         bottom_sectors_text = ", ".join([f"{s['name']}({s['change_pct']:+.2f}%)" for s in overview.bottom_sectors[:3]])
         top_concepts_text = ", ".join([f"{s['name']}({s['change_pct']:+.2f}%)" for s in overview.top_concepts[:5]])
         bottom_concepts_text = ", ".join([f"{s['name']}({s['change_pct']:+.2f}%)" for s in overview.bottom_concepts[:3]])
-        hot_stocks_text = "\n".join(
-            [
-                f"- {s.get('rank', '-')}. {s.get('name', '-')}"
-                f"({s.get('code', '-')}) {self._format_signed_pct(s.get('change_pct'))}"
-                f" 来源:{s.get('source', '-')}"
-                for s in overview.hot_stocks[:8]
-            ]
-        )
-        limit_up_text = "\n".join(
-            [
-                f"- {s.get('name', '-')}({s.get('code', '-')}): "
-                f"{s.get('consecutive_boards') or 1}连板, {s.get('industry') or '-'}, "
-                f"首封 {self._format_limit_time(s.get('first_limit_time'))}"
-                for s in overview.limit_up_stocks[:10]
-            ]
-        )
+        hot_stocks_text = ""
+        limit_up_text = ""
+        if is_a_share_review:
+            hot_stocks_text = "\n".join(
+                [
+                    f"- {s.get('rank', '-')}. {s.get('name', '-')}"
+                    f"({s.get('code', '-')}) {self._format_signed_pct(s.get('change_pct'))}"
+                    f" 来源:{s.get('source', '-')}"
+                    for s in overview.hot_stocks[:8]
+                ]
+            )
+            limit_up_text = "\n".join(
+                [
+                    f"- {s.get('name', '-')}({s.get('code', '-')}): "
+                    f"{s.get('consecutive_boards') or 1}连板, {s.get('industry') or '-'}, "
+                    f"首封 {self._format_limit_time(s.get('first_limit_time'))}"
+                    for s in overview.limit_up_stocks[:10]
+                ]
+            )
         
         # 新闻信息 - 支持 SearchResult 对象或字典
         news_text = ""
@@ -1157,14 +1161,15 @@ Concept laggards: {bottom_concepts_text if bottom_concepts_text else "N/A"}"""
             else:
                 sector_block = "## 板块表现\n（该市场暂无板块涨跌数据）"
 
-        if review_language == "en":
+        hot_stock_context = ""
+        if is_a_share_review and review_language == "en":
             hot_stock_context = f"""## Hot Stocks and Limit-up Ladder
 Hot stocks:
 {hot_stocks_text if hot_stocks_text else "N/A"}
 
 Limit-up ladder:
 {limit_up_text if limit_up_text else "N/A"}"""
-        else:
+        elif is_a_share_review:
             hot_stock_context = f"""## 热门个股与涨停梯队
 人气股:
 {hot_stocks_text if hot_stocks_text else "暂无数据"}
@@ -1191,6 +1196,35 @@ Limit-up ladder:
 
         if review_language == "en":
             report_title = self._get_review_title(overview.date).removeprefix("## ").strip()
+            leadership_requirement = (
+                "- Separate industry rankings from tradable themes: use concept themes, hot stocks, and limit-up ladder to validate the real market leadership."
+                if is_a_share_review
+                else "- Separate index action, available sector signals, and news catalysts; do not invent unsupported A-share-only short-term sentiment signals for this market."
+            )
+            tail_template = (
+                """### 5. Hot Stocks & Limit-up Ladder
+(Summarize hot stocks, limit-up clusters, consecutive-board leaders, and what they confirm or contradict about leadership.)
+
+### 6. Outlook
+(Provide the near-term outlook based on price action and news; classify catalysts as tailwinds, disturbances, or unconfirmed signals.)
+
+### 7. Risk Alerts
+(List 3-5 concrete risks to monitor.)
+
+### 8. Strategy Plan
+(Provide an offensive/balanced/defensive stance, a position-sizing guideline, one invalidation trigger, and end with “For reference only, not investment advice.”)
+"""
+                if is_a_share_review
+                else """### 5. Outlook
+(Provide the near-term outlook based on price action and news; classify catalysts as tailwinds, disturbances, or unconfirmed signals.)
+
+### 6. Risk Alerts
+(List 3-5 concrete risks to monitor.)
+
+### 7. Strategy Plan
+(Provide an offensive/balanced/defensive stance, a position-sizing guideline, one invalidation trigger, and end with “For reference only, not investment advice.”)
+"""
+            )
             return f"""You are a professional US/A/H market analyst. Please produce a concise market recap report based on the data below.
 
 [Requirements]
@@ -1199,7 +1233,7 @@ Limit-up ladder:
 - No code blocks
 - Use emoji sparingly in headings (at most one per heading)
 - The entire fixed shell, headings, guidance, and conclusion must be in English
-- Separate industry rankings from tradable themes: use concept themes, hot stocks, and limit-up ladder to validate the real market leadership.
+{leadership_requirement}
 - Do not make the report too thin: target 900-1300 English words; each section should include either 2-4 sentences or 3 concrete bullets.
 - Fund flows, news catalysts, strategy, and risk alerts must contain actionable interpretation, not generic one-liners.
 
@@ -1244,17 +1278,7 @@ Limit-up ladder:
 ### 4. Sector Highlights
 (Analyze the drivers behind the leading industries and concept themes. State if industry rankings and tradable themes diverge.)
 
-### 5. Hot Stocks & Limit-up Ladder
-(Summarize hot stocks, limit-up clusters, consecutive-board leaders, and what they confirm or contradict about leadership.)
-
-### 6. Outlook
-(Provide the near-term outlook based on price action and news; classify catalysts as tailwinds, disturbances, or unconfirmed signals.)
-
-### 7. Risk Alerts
-(List 3-5 concrete risks to monitor.)
-
-### 8. Strategy Plan
-(Provide an offensive/balanced/defensive stance, a position-sizing guideline, one invalidation trigger, and end with “For reference only, not investment advice.”)
+{tail_template}
 
 ---
 
@@ -1262,6 +1286,47 @@ Output the report content directly, no extra commentary.
 """
 
         # A 股场景使用中文提示语
+        leadership_requirement = (
+            "- 必须区分“行业涨幅榜”和“真实交易主线”：用热门概念、人气股、涨停连板去校验板块判断，不能把行业涨幅第一直接等同于核心主线"
+            if is_a_share_review
+            else f"- 必须按{self._get_market_scope_name('zh')}可得数据分析，不要要求或编造该市场未提供的 A 股专属短线情绪数据"
+        )
+        tail_template = (
+            """### 三、板块主线
+（分析行业涨跌与概念题材背后的逻辑、持续性；说明二者是否一致，真正主线是谁；给出主线扩散/分歧观察点）
+
+### 四、热门股票与连板
+（概括人气股、涨停个股、连板高度和涨停原因聚集方向，用来验证或修正板块主线判断；说明高标与中军是否共振）
+
+### 五、资金与情绪
+（解读成交额、涨跌停结构、市场宽度和风险偏好；说明是普涨、结构性行情还是分化行情）
+
+### 六、消息催化
+（结合近三日新闻，提炼真正影响明日交易的催化或扰动；按“利好/扰动/待验证”分类）
+
+### 七、明日交易计划
+（给出进攻/均衡/防守结论、仓位区间、关注方向、回避方向、观察锚点和一个触发失效条件）
+
+### 八、风险提示
+（列出 3-5 个需要关注的风险点；最后补充“建议仅供参考，不构成投资建议”。）
+"""
+            if is_a_share_review
+            else """### 三、板块与主题线索
+（结合可得板块、主题和新闻线索分析市场主线；没有板块数据时不要编造，用指数分化和新闻催化说明方向）
+
+### 四、资金与情绪
+（解读成交活跃度、指数承接和风险偏好；说明是普涨、结构性行情还是分化行情，不使用 A 股涨跌停指标）
+
+### 五、消息催化
+（结合近三日新闻，提炼真正影响明日交易的催化或扰动；按“利好/扰动/待验证”分类）
+
+### 六、明日交易计划
+（给出进攻/均衡/防守结论、仓位区间、关注方向、回避方向、观察锚点和一个触发失效条件）
+
+### 七、风险提示
+（列出 3-5 个需要关注的风险点；最后补充“建议仅供参考，不构成投资建议”。）
+"""
+        )
         return f"""你是一位专业的A/H/美股市场分析师，请根据以下数据生成一份结构化的{self._get_market_scope_name('zh')}大盘复盘报告。
 
 【重要】输出要求：
@@ -1273,7 +1338,7 @@ Output the report content directly, no extra commentary.
 - 不要重复列出已由系统注入的表格数据；正文负责解释表格背后的含义
 - 正文不能过短：整篇建议 1200-1800 个中文字符；每个二级小节至少 2-4 句或 3 条要点
 - 资金与情绪、消息催化、交易计划、风险提示必须给出可执行判断，不能只写一句泛泛提示
-- 必须区分“行业涨幅榜”和“真实交易主线”：用热门概念、人气股、涨停连板去校验板块判断，不能把行业涨幅第一直接等同于核心主线
+{leadership_requirement}
 
 ---
 
@@ -1312,23 +1377,7 @@ Output the report content directly, no extra commentary.
 ### 二、指数结构
 （{self._get_index_hint()}，说明谁在护盘、谁在拖累，以及关键支撑/压力；至少比较两个指数的强弱）
 
-### 三、板块主线
-（分析行业涨跌与概念题材背后的逻辑、持续性；说明二者是否一致，真正主线是谁；给出主线扩散/分歧观察点）
-
-### 四、热门股票与连板
-（概括人气股、涨停个股、连板高度和涨停原因聚集方向，用来验证或修正板块主线判断；说明高标与中军是否共振）
-
-### 五、资金与情绪
-（解读成交额、涨跌停结构、市场宽度和风险偏好；说明是普涨、结构性行情还是分化行情）
-
-### 六、消息催化
-（结合近三日新闻，提炼真正影响明日交易的催化或扰动；按“利好/扰动/待验证”分类）
-
-### 七、明日交易计划
-（给出进攻/均衡/防守结论、仓位区间、关注方向、回避方向、观察锚点和一个触发失效条件）
-
-### 八、风险提示
-（列出 3-5 个需要关注的风险点；最后补充“建议仅供参考，不构成投资建议”。）
+{tail_template}
 
 ---
 
