@@ -24,6 +24,32 @@ def test_temperature_default_only_error_sets_temperature_to_one() -> None:
     assert recovery.omit_params == ()
 
 
+def test_temperature_default_only_error_uses_named_default_value() -> None:
+    recovery = classify_litellm_generation_param_error(
+        RuntimeError(
+            "Unsupported value: 'temperature' does not support 1.0 with this model. "
+            "Only `0.6` is allowed."
+        )
+    )
+
+    assert recovery is not None
+    assert recovery.set_params == {"temperature": 0.6}
+    assert recovery.omit_params == ()
+
+
+def test_temperature_default_only_error_without_named_value_omits_temperature() -> None:
+    recovery = classify_litellm_generation_param_error(
+        RuntimeError(
+            "Unsupported value: 'temperature' does not support 0.7 with this model. "
+            "Only the default value is supported."
+        )
+    )
+
+    assert recovery is not None
+    assert recovery.set_params == {}
+    assert recovery.omit_params == ("temperature",)
+
+
 def test_unsupported_temperature_error_retries_once_and_caches_recovery() -> None:
     clear_litellm_generation_param_recovery_cache()
     calls = []

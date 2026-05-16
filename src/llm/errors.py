@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Callable, Dict, List, Optional
 
 from src.llm.generation_params import (
@@ -19,6 +20,16 @@ _UNSUPPORTED_PARAM_MARKERS = (
     "not allowed",
     "invalid parameter",
     "does not support",
+)
+
+_TEMPERATURE_VALUE_PATTERN = r"-?\d+(?:\.\d+)?"
+_ALLOWED_TEMPERATURE_PATTERNS = (
+    re.compile(
+        rf"\bonly\s+(?:the\s+)?(?:default\s+)?(?:temperature\s+)?(?:value\s+)?[\(`'\"]*(?P<value>{_TEMPERATURE_VALUE_PATTERN})(?!\w)"
+    ),
+    re.compile(
+        rf"\bdefault(?:\s+temperature)?(?:\s+value)?\s*(?:is|=|:)\s*[\(`'\"]*(?P<value>{_TEMPERATURE_VALUE_PATTERN})(?!\w)"
+    ),
 )
 
 
@@ -52,6 +63,20 @@ def _normalized_error_text(error: BaseException) -> str:
     return " ".join(chunk for chunk in _collect_error_text(error) if chunk).lower()
 
 
+def _parse_allowed_temperature(text: str) -> Optional[float]:
+    for segment in re.split(r"(?<!\d)\.(?!\d)|[!?;\n]+", text):
+        if "only" not in segment:
+            continue
+        for pattern in _ALLOWED_TEMPERATURE_PATTERNS:
+            match = pattern.search(segment[segment.find("only") :])
+            if match is None:
+                continue
+            value = float(match.group("value"))
+            if 0 <= value <= 2:
+                return value
+    return None
+
+
 def classify_litellm_generation_param_error(
     error: BaseException,
 ) -> Optional[GenerationParamRecovery]:
@@ -61,9 +86,15 @@ def classify_litellm_generation_param_error(
         return None
 
     if "temperature" in text:
-        if "only" in text and ("1.0" in text or "default" in text or " value 1" in text):
+        allowed_temperature = _parse_allowed_temperature(text)
+        if allowed_temperature is not None:
             return GenerationParamRecovery(
-                set_params={"temperature": 1.0},
+                set_params={"temperature": allowed_temperature},
+                reason="temperature_default_only",
+            )
+        if "only" in text and "default" in text:
+            return GenerationParamRecovery(
+                omit_params=("temperature",),
                 reason="temperature_default_only",
             )
         if any(marker in text for marker in _UNSUPPORTED_PARAM_MARKERS):
