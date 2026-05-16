@@ -263,6 +263,21 @@ class ConfigEnvCompatibilityTestCase(unittest.TestCase):
             config = Config._load_from_env()
         self.assertFalse(config.report_show_llm_model)
 
+    @patch("src.config.setup_env")
+    @patch.object(Config, "_parse_litellm_yaml", return_value=[])
+    def test_market_review_color_scheme_defaults_and_accepts_red_up(
+        self,
+        _mock_parse_yaml,
+        _mock_setup_env,
+    ) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            config = Config._load_from_env()
+        self.assertEqual(config.market_review_color_scheme, "green_up")
+
+        with patch.dict(os.environ, {"MARKET_REVIEW_COLOR_SCHEME": "red-up"}, clear=True):
+            config = Config._load_from_env()
+        self.assertEqual(config.market_review_color_scheme, "red_up")
+
     @patch.object(Config, "_parse_litellm_yaml", return_value=[])
     def test_runtime_mutable_keys_reload_from_updated_env_file_after_runtime_refresh(
         self,

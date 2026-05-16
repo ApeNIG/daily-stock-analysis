@@ -280,7 +280,6 @@ class TestNotificationNoiseFieldsRegistered(unittest.TestCase):
         for key in self._NOISE_KEYS:
             self.assertIn(key, field_keys, f"{key} missing from schema response")
 
-
 class TestReportDisplayFieldsRegistered(unittest.TestCase):
     """Report display toggles should be visible in settings schema."""
 
@@ -301,6 +300,26 @@ class TestReportDisplayFieldsRegistered(unittest.TestCase):
         self.assertIsNotNone(notification_cat, "notification category missing")
         field_keys = {f["key"] for f in notification_cat["fields"]}
         self.assertIn("REPORT_SHOW_LLM_MODEL", field_keys)
+
+
+class TestMarketReviewFieldsRegistered(unittest.TestCase):
+    """Market review behavior toggles should be visible in settings schema."""
+
+    def test_market_review_color_scheme_field_definition_exists(self):
+        field = get_field_definition("MARKET_REVIEW_COLOR_SCHEME")
+        self.assertEqual(field["category"], "system")
+        self.assertEqual(field["data_type"], "string")
+        self.assertEqual(field["ui_control"], "select")
+        self.assertEqual(field["default_value"], "green_up")
+        self.assertEqual(field["validation"]["enum"], ["green_up", "red_up"])
+        self.assertFalse(field["is_sensitive"])
+
+    def test_schema_response_includes_market_review_color_scheme(self):
+        schema = build_schema_response()
+        system_cat = next((c for c in schema["categories"] if c["category"] == "system"), None)
+        self.assertIsNotNone(system_cat, "system category missing")
+        field_keys = {f["key"] for f in system_cat["fields"]}
+        self.assertIn("MARKET_REVIEW_COLOR_SCHEME", field_keys)
 
 
 if __name__ == "__main__":
