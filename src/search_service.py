@@ -2505,8 +2505,8 @@ class SearchService:
 
         terms: List[str] = []
         upper = raw.upper()
-        is_one_letter_us_ticker = bool(len(upper) == 1 and cls._US_STOCK_RE.match(upper))
-        if not is_one_letter_us_ticker:
+        is_us_ticker = bool(cls._US_STOCK_RE.match(upper))
+        if not is_us_ticker:
             cls._append_unique(terms, raw)
             cls._append_unique(terms, upper)
 
@@ -2537,6 +2537,8 @@ class SearchService:
             cls._append_unique(terms, f"${upper}")
             cls._append_unique(terms, f"NASDAQ:{upper}")
             cls._append_unique(terms, f"NYSE:{upper}")
+            if len(upper) > 1:
+                cls._append_unique(terms, upper)
             return terms
 
         return terms
@@ -2599,6 +2601,17 @@ class SearchService:
         return bool(re.search(pattern, lower_text))
 
     @classmethod
+    def _contains_stock_code_identity_term(cls, text: str, term: str) -> bool:
+        if not text or not term:
+            return False
+
+        if cls._US_STOCK_RE.match(term) and term.upper() == term and not term.startswith("$"):
+            pattern = r"(?<![A-Za-z0-9$:.])" + re.escape(term) + r"(?![A-Za-z0-9.])"
+            return bool(re.search(pattern, text))
+
+        return cls._contains_identity_term(text, term)
+
+    @classmethod
     def _contains_any_news_term(cls, text: str, terms: Tuple[str, ...]) -> bool:
         lower = (text or "").lower()
         return any(term.lower() in lower for term in terms)
@@ -2630,7 +2643,7 @@ class SearchService:
                 reasons.append(reason)
 
         for term in cls._stock_code_identity_terms(stock_code):
-            if cls._contains_identity_term(title, term):
+            if cls._contains_stock_code_identity_term(title, term):
                 score += 55
                 direct_signal += 55
                 has_stock_code_signal = True
@@ -2638,7 +2651,7 @@ class SearchService:
                 break
         else:
             for term in cls._stock_code_identity_terms(stock_code):
-                if cls._contains_identity_term(snippet, term):
+                if cls._contains_stock_code_identity_term(snippet, term):
                     score += 34
                     direct_signal += 34
                     has_stock_code_signal = True
@@ -2646,7 +2659,7 @@ class SearchService:
                     break
             else:
                 for term in cls._stock_code_identity_terms(stock_code):
-                    if cls._contains_identity_term(url, term):
+                    if cls._contains_stock_code_identity_term(url, term):
                         score += 18
                         direct_signal += 18
                         has_stock_code_signal = True
@@ -2758,7 +2771,7 @@ class SearchService:
             if not prefer_chinese:
                 language_rank = 0
             score = result.relevance_score or 0
-            return (category_rank, -score, language_rank, index)
+            return (category_rank, language_rank, -score, index)
 
         ranked_results = [result for _, result in sorted(indexed_results, key=sort_key)]
         limited_results = ranked_results[:max_results]

@@ -258,6 +258,44 @@ class SearchNewsFreshnessTestCase(unittest.TestCase):
         p1.search.assert_called_once()
         p2.search.assert_called_once()
 
+    def test_search_stock_news_prefers_chinese_direct_hit_before_score_truncation(self) -> None:
+        """Chinese direct hits should outrank higher-scored English direct hits before limiting."""
+        fresh = datetime.now().date().isoformat()
+        service = SearchService(
+            bocha_keys=["dummy_key"],
+            searxng_public_instances_enabled=False,
+            news_max_age_days=3,
+            news_strategy_profile="short",
+        )
+
+        provider = SimpleNamespace(
+            is_available=True,
+            name="MixedDirect",
+            search=MagicMock(
+                return_value=_response(
+                    [
+                        _result(
+                            "Kweichow Moutai 600519 announces buyback",
+                            fresh,
+                            snippet="The company reported an updated share repurchase plan.",
+                        ),
+                        _result(
+                            "贵州茅台 发布回购公告",
+                            fresh,
+                            snippet="公司披露回购方案。",
+                        ),
+                    ]
+                )
+            ),
+        )
+        service._providers = [provider]
+
+        resp = service.search_stock_news("600519", "贵州茅台", max_results=1)
+
+        self.assertEqual([r.title for r in resp.results], ["贵州茅台 发布回购公告"])
+        self.assertEqual(resp.results[0].relevance_category, "direct_company_news")
+        provider.search.assert_called_once()
+
     def test_search_stock_news_keeps_english_provider_order_for_us_stock(self) -> None:
         """English stock searches should keep the first successful provider result."""
         fresh = datetime.now().date().isoformat()
@@ -505,6 +543,54 @@ class SearchNewsFreshnessTestCase(unittest.TestCase):
         resp = service.search_stock_news("A", "Agilent Technologies", max_results=1)
 
         self.assertEqual(resp.results[0].title, "Agilent Technologies announces quarterly earnings")
+        self.assertEqual(resp.results[0].relevance_category, "direct_company_news")
+        p1.search.assert_called_once()
+        p2.search.assert_called_once()
+
+    def test_common_word_us_ticker_does_not_match_title_case_words(self) -> None:
+        """Bare alphabetic tickers should not turn ordinary words into direct hits."""
+        fresh = datetime.now().date().isoformat()
+        service = SearchService(
+            bocha_keys=["dummy_key"],
+            searxng_public_instances_enabled=False,
+            news_max_age_days=3,
+            news_strategy_profile="short",
+        )
+        p1 = SimpleNamespace(
+            is_available=True,
+            name="GenericProvider",
+            search=MagicMock(
+                return_value=_response(
+                    [
+                        _result(
+                            "All investors brace for inflation data",
+                            fresh,
+                            snippet="Market participants watch a broad macro update.",
+                        )
+                    ]
+                )
+            ),
+        )
+        p2 = SimpleNamespace(
+            is_available=True,
+            name="CompanyProvider",
+            search=MagicMock(
+                return_value=_response(
+                    [
+                        _result(
+                            "ALL Allstate quarterly earnings beat expectations",
+                            fresh,
+                            snippet="Allstate revenue guidance improved after quarterly results.",
+                        )
+                    ]
+                )
+            ),
+        )
+        service._providers = [p1, p2]
+
+        resp = service.search_stock_news("ALL", "Allstate", max_results=1)
+
+        self.assertEqual(resp.results[0].title, "ALL Allstate quarterly earnings beat expectations")
         self.assertEqual(resp.results[0].relevance_category, "direct_company_news")
         p1.search.assert_called_once()
         p2.search.assert_called_once()
