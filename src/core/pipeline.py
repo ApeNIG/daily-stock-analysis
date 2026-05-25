@@ -1036,7 +1036,7 @@ class StockAnalysisPipeline:
             # 保存分析历史记录
             if result and result.success:
                 try:
-                    history_context = self._build_context_snapshot(
+                    agent_context_snapshot = self._build_context_snapshot(
                         enhanced_context={
                             **self._without_market_phase_context(initial_context),
                             "stock_name": resolved_stock_name,
@@ -1045,20 +1045,24 @@ class StockAnalysisPipeline:
                         realtime_quote=realtime_quote,
                         chip_data=chip_data,
                     )
-                    result.diagnostic_context_snapshot = history_context
-                    history_context["stock_name"] = resolved_stock_name
+                    result.diagnostic_context_snapshot = agent_context_snapshot
+                    agent_context_snapshot["stock_name"] = resolved_stock_name
                     saved_count = self.db.save_analysis_history(
                         result=result,
                         query_id=query_id,
                         report_type=report_type.value,
                         news_content=None,
-                        context_snapshot=history_context,
+                        context_snapshot=agent_context_snapshot,
                         save_snapshot=self.save_context_snapshot,
                     )
                     record_history_run(
                         report_saved=bool(saved_count),
                         metadata_saved=bool(saved_count),
                     )
+                    latest_diagnostic_snapshot = current_diagnostic_snapshot()
+                    if latest_diagnostic_snapshot is not None:
+                        agent_context_snapshot["diagnostics"] = latest_diagnostic_snapshot
+                        result.diagnostic_context_snapshot = agent_context_snapshot
                 except Exception as e:
                     record_history_run(
                         report_saved=False,

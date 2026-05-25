@@ -204,7 +204,8 @@ class PipelineMarketPhaseContextTestCase(unittest.TestCase):
         save_kwargs = pipeline.db.save_analysis_history.call_args.kwargs
         self.assertTrue(save_kwargs["save_snapshot"])
         self.assertNotIn("market_phase_context", save_kwargs["context_snapshot"])
-        self.assertEqual(save_kwargs["context_snapshot"]["enhanced_context"]["stock_name"], "贵州茅台")
+        enhanced_context = save_kwargs["context_snapshot"]["enhanced_context"]
+        self.assertEqual(enhanced_context["stock_name"], "贵州茅台")
 
     def test_agent_history_snapshot_contains_diagnostics_context_when_active(self):
         pipeline = _make_pipeline(agent_mode=True, save_context_snapshot=True)
@@ -257,9 +258,7 @@ class PipelineMarketPhaseContextTestCase(unittest.TestCase):
             self.assertEqual(diagnostics["trace_id"], "trace-agent")
             self.assertEqual(diagnostics["query_id"], "q-agent")
             self.assertEqual(diagnostics["provider_runs"], [])
-            self.assertEqual(current_diagnostic_snapshot()["trace_id"], "trace-agent")
-            self.assertEqual(current_diagnostic_snapshot()["query_id"], "q-agent")
-            self.assertEqual(current_diagnostic_snapshot()["provider_runs"], diagnostics["provider_runs"])
+            self.assertEqual(current_diagnostic_snapshot(), diagnostics)
         finally:
             reset_run_diagnostic_context(token)
 
