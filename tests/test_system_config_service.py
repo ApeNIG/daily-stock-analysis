@@ -222,6 +222,48 @@ class SystemConfigServiceTestCase(unittest.TestCase):
             self.assertEqual(items_after["LLM_MY_PROXY_MODELS"]["value"], "openai/gpt-5")
             self.assertFalse(items_after["LLM_MY_PROXY_MODELS"]["raw_value_exists"])
 
+    def test_runtime_env_fallback_does_not_override_saved_provider_and_base_url_settings(self) -> None:
+        self._rewrite_env(
+            "STOCK_LIST=600519",
+            "LOG_LEVEL=INFO",
+            "LITELLM_MODEL=openai/gpt-4o-mini",
+            "OPENAI_MODEL=gpt-4.1",
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "OPENAI_BASE_URL": "https://runtime-openai.v1",
+                "OPENAI_API_KEY": "runtime-openai-key",
+            },
+            clear=False,
+        ):
+            pre_save = self.service.get_config(include_schema=True)
+            pre_save_items = {item["key"]: item for item in pre_save["items"]}
+
+            self.assertEqual(pre_save_items["OPENAI_BASE_URL"]["value"], "https://runtime-openai.v1")
+            self.assertFalse(pre_save_items["OPENAI_BASE_URL"]["raw_value_exists"])
+            self.assertEqual(pre_save_items["OPENAI_API_KEY"]["value"], "runtime-openai-key")
+            self.assertFalse(pre_save_items["OPENAI_API_KEY"]["raw_value_exists"])
+            self.assertEqual(pre_save_items["LITELLM_MODEL"]["value"], "openai/gpt-4o-mini")
+            self.assertTrue(pre_save_items["LITELLM_MODEL"]["raw_value_exists"])
+            self.assertEqual(pre_save_items["OPENAI_MODEL"]["value"], "gpt-4.1")
+            self.assertTrue(pre_save_items["OPENAI_MODEL"]["raw_value_exists"])
+
+            response = self.service.update(
+                config_version=self.manager.get_config_version(),
+                items=[{"key": "STOCK_LIST", "value": "300750"}],
+                reload_now=False,
+            )
+            self.assertTrue(response["success"])
+
+            current_map = self.manager.read_config_map()
+            self.assertEqual(current_map["STOCK_LIST"], "300750")
+            self.assertEqual(current_map["LITELLM_MODEL"], "openai/gpt-4o-mini")
+            self.assertEqual(current_map["OPENAI_MODEL"], "gpt-4.1")
+            self.assertNotIn("OPENAI_BASE_URL", current_map)
+            self.assertNotIn("OPENAI_API_KEY", current_map)
+
     def test_validate_uses_runtime_injected_llm_channels_for_support_keys(self) -> None:
         self._rewrite_env(
             "STOCK_LIST=600519",
