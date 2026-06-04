@@ -9,6 +9,7 @@ import unittest
 from types import SimpleNamespace
 from typing import Any, Dict
 from unittest.mock import ANY, MagicMock, patch
+import threading
 
 from fastapi import HTTPException
 
@@ -872,7 +873,10 @@ class AlphaSiftOpportunitiesApiTestCase(unittest.TestCase):
 
         self.assertEqual(payload["candidate_count"], 0)
         self.assertEqual(completion_calls[0]["extra_headers"], {"x-tenant": "dsa"})
-        self.assertIs(fake_litellm.completion, completion_impl)
+        self.assertIsNot(fake_litellm.completion, completion_impl)
+        self.assertTrue(
+            getattr(fake_litellm.completion, "_alphasift_litellm_completion_bridge", False),
+        )
 
     def test_screen_bridges_legacy_openai_fields_into_alphasift_runtime_env(self) -> None:
         config = Config(
@@ -973,7 +977,95 @@ class AlphaSiftOpportunitiesApiTestCase(unittest.TestCase):
             completion_calls[0]["api_base"],
             "https://openai-compatible.example/v1",
         )
-        self.assertIs(fake_litellm.completion, completion_impl)
+        self.assertIsNot(fake_litellm.completion, completion_impl)
+        self.assertTrue(
+            getattr(fake_litellm.completion, "_alphasift_litellm_completion_bridge", False),
+        )
+
+    def test_screen_handles_concurrent_requests_without_litellm_header_cross_pollution(self) -> None:
+        config_a = Config(
+            alphasift_enabled=True,
+            alphasift_install_spec=DEFAULT_ALPHASIFT_TEST_SPEC,
+            litellm_model="gemini/gemini-2.5-flash",
+            llm_channels=[
+                {
+                    "name": "gemini",
+                    "protocol": "gemini",
+                    "enabled": True,
+                    "api_keys": ["dsa-gemini-key-a"],
+                    "models": ["gemini/gemini-2.5-flash"],
+                    "extra_headers": {"x-tenant": "tenant-a"},
+                }
+            ],
+        )
+        config_b = Config(
+            alphasift_enabled=True,
+            alphasift_install_spec=DEFAULT_ALPHASIFT_TEST_SPEC,
+            litellm_model="gemini/gemini-2.5-flash",
+            llm_channels=[
+                {
+                    "name": "gemini",
+                    "protocol": "gemini",
+                    "enabled": True,
+                    "api_keys": ["dsa-gemini-key-b"],
+                    "models": ["gemini/gemini-2.5-flash"],
+                    "extra_headers": {"x-tenant": "tenant-b"},
+                }
+            ],
+        )
+
+        completion_calls: list[Dict[str, Any]] = []
+        thread_b_ready = threading.Event()
+        completion_lock = threading.Lock()
+
+        def completion_impl(**kwargs: Any) -> Any:
+            with completion_lock:
+                completion_calls.append(kwargs)
+            return SimpleNamespace(choices=[])
+
+        fake_litellm = SimpleNamespace(completion=completion_impl)
+
+        def screen_impl(_strategy: str, **kwargs: Any) -> Dict[str, Any]:
+            context = kwargs.get("context") or {}
+            llm = context.get("llm", {})
+            channels = llm.get("channels") or []
+            headers = (channels[0] if channels else {}).get("extra_headers", {})
+            tenant = headers.get("x-tenant")
+            if tenant == "tenant-a":
+                thread_b_ready.wait(timeout=2)
+            else:
+                thread_b_ready.set()
+            fake_litellm.completion(
+                model="gemini/gemini-2.5-flash",
+                api_key=(channels[0].get("api_keys") or [""])[0],
+                messages=[{"role": "user", "content": "rank"}],
+            )
+            return {"candidates": []}
+
+        fake_module = _make_adapter_module(screen=MagicMock(side_effect=screen_impl))
+
+        def _run_screen(config: Config) -> None:
+            self._screen(config, market="cn", strategy="dual_low", max_results=5, mock_enrichment=False)
+
+        with (
+            patch.dict(sys.modules, {"litellm": fake_litellm}, clear=False),
+            patch("src.services.alphasift_service._import_alphasift", return_value=fake_module),
+        ):
+            thread_a = threading.Thread(target=_run_screen, args=(config_a,))
+            thread_b = threading.Thread(target=_run_screen, args=(config_b,))
+            thread_a.start()
+            thread_b.start()
+            thread_a.join()
+            thread_b.join()
+
+        self.assertEqual(len(completion_calls), 2)
+        self.assertCountEqual(
+            [call.get("extra_headers", {}).get("x-tenant") for call in completion_calls],
+            ["tenant-a", "tenant-b"],
+        )
+        self.assertTrue(
+            thread_a.is_alive() is False and thread_b.is_alive() is False,
+        )
 
     def test_screen_disabled_preserves_existing_llm_env_state(self) -> None:
         config = self._config(enabled=False)

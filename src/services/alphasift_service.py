@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 import threading
+from contextvars import ContextVar
 from contextlib import contextmanager
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
@@ -39,6 +40,12 @@ DSA_ALPHASIFT_SNAPSHOT_SOURCE_PRIORITY = "em_datacenter,tushare,efinance,akshare
 _DSA_FETCHER_MANAGER_LOCK = threading.RLock()
 _DSA_FETCHER_MANAGER: Any = None
 _FUNDAMENTAL_BLOCKS = ("valuation", "growth", "earnings", "institution", "capital_flow", "boards")
+_ALPHASIFT_LITELLM_COMPLETION_ROUTES: ContextVar[Optional[Tuple[Dict[str, Any], ...]]] = ContextVar(
+    "alphasift_litellm_completion_routes",
+    default=None,
+)
+_ALPHASIFT_LITELLM_COMPLETION_ATTR = "_alphasift_litellm_completion_bridge"
+_ALPHASIFT_LITELLM_COMPLETION_LOCK = threading.Lock()
 
 
 class AlphaSiftStrategyResponse(BaseModel):
@@ -734,31 +741,56 @@ def _alphasift_litellm_headers(config: Config) -> Iterator[None]:
         yield
         return
 
-    original_completion = getattr(litellm_module, "completion", None)
-    if not callable(original_completion):
+    completion = getattr(litellm_module, "completion", None)
+    if not callable(completion):
         yield
         return
 
+    bridge_completion = getattr(completion, _ALPHASIFT_LITELLM_COMPLETION_ATTR, None)
+    if bridge_completion:
+        token = _ALPHASIFT_LITELLM_COMPLETION_ROUTES.set(
+            tuple(route.copy() for route in header_routes),
+        )
+        try:
+            yield
+        finally:
+            _ALPHASIFT_LITELLM_COMPLETION_ROUTES.reset(token)
+        return
+
+    original_completion = completion
+
     def completion_with_dsa_headers(*args: Any, **kwargs: Any) -> Any:
-        headers = _match_alphasift_litellm_headers(args, kwargs, header_routes)
-        if headers:
-            existing_headers = kwargs.get("extra_headers")
-            if isinstance(existing_headers, dict):
-                merged_headers = dict(headers)
-                merged_headers.update(existing_headers)
-                kwargs = dict(kwargs)
-                kwargs["extra_headers"] = merged_headers
-            elif existing_headers in (None, ""):
-                kwargs = dict(kwargs)
-                kwargs["extra_headers"] = dict(headers)
+        routes = _ALPHASIFT_LITELLM_COMPLETION_ROUTES.get()
+        if routes:
+            headers = _match_alphasift_litellm_headers(args, kwargs, routes)
+            if headers:
+                existing_headers = kwargs.get("extra_headers")
+                if isinstance(existing_headers, dict):
+                    merged_headers = dict(headers)
+                    merged_headers.update(existing_headers)
+                    kwargs = dict(kwargs)
+                    kwargs["extra_headers"] = merged_headers
+                elif existing_headers in (None, ""):
+                    kwargs = dict(kwargs)
+                    kwargs["extra_headers"] = dict(headers)
         return original_completion(*args, **kwargs)
 
-    setattr(litellm_module, "completion", completion_with_dsa_headers)
+    setattr(completion_with_dsa_headers, _ALPHASIFT_LITELLM_COMPLETION_ATTR, True)
+    setattr(completion_with_dsa_headers, "_alphasift_litellm_completion_original", original_completion)
+    completion_with_dsa_headers.__name__ = "completion_with_dsa_headers"
+
+    if completion is not completion_with_dsa_headers:
+        with _ALPHASIFT_LITELLM_COMPLETION_LOCK:
+            if not getattr(getattr(litellm_module, "completion", None), _ALPHASIFT_LITELLM_COMPLETION_ATTR, False):
+                setattr(litellm_module, "completion", completion_with_dsa_headers)
+
+    token = _ALPHASIFT_LITELLM_COMPLETION_ROUTES.set(
+        tuple(route.copy() for route in header_routes),
+    )
     try:
         yield
     finally:
-        if getattr(litellm_module, "completion", None) is completion_with_dsa_headers:
-            setattr(litellm_module, "completion", original_completion)
+        _ALPHASIFT_LITELLM_COMPLETION_ROUTES.reset(token)
 
 
 def _build_alphasift_litellm_model_list(config: Config, channels: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
