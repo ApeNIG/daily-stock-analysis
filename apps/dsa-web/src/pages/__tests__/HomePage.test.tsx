@@ -26,6 +26,7 @@ vi.mock('../../api/history', () => ({
     getNews: vi.fn().mockResolvedValue({ total: 0, items: [] }),
     getMarkdown: vi.fn().mockResolvedValue('# report'),
     getDiagnostics: vi.fn(),
+    deleteByCode: vi.fn(),
     getStockBarList: vi.fn().mockResolvedValue({ total: 0, items: [] }),
   },
 }));
@@ -281,6 +282,49 @@ describe('HomePage', () => {
     fireEvent.click(await screen.findByRole('button', { name: /MARKET/ }));
 
     expect(await screen.findByText('大盘复盘摘要')).toBeInTheDocument();
+  });
+
+  it('removes the MARKET stock bar item after deleting market review history', async () => {
+    let isMarketReviewDeleted = false;
+    vi.mocked(historyApi.getStockBarList).mockResolvedValue({
+      total: 0,
+      items: [],
+    });
+    vi.mocked(historyApi.getList).mockImplementation((params: { reportType?: string } = {}) => {
+      if (params.reportType === 'market_review') {
+        return Promise.resolve({
+          total: isMarketReviewDeleted ? 0 : 1,
+          page: 1,
+          limit: 10,
+          items: isMarketReviewDeleted ? [] : [marketReviewHistoryItem],
+        });
+      }
+      return Promise.resolve({
+        total: 0,
+        page: 1,
+        limit: 20,
+        items: [],
+      });
+    });
+    vi.mocked(historyApi.deleteByCode).mockImplementation(async () => {
+      isMarketReviewDeleted = true;
+      return { deleted: 1 };
+    });
+
+    render(
+      <MemoryRouter>
+        <HomePage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole('button', { name: /MARKET/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '删除 大盘复盘 历史记录' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /MARKET/ })).not.toBeInTheDocument();
+    });
+    expect(historyApi.deleteByCode).toHaveBeenCalledWith('MARKET');
   });
 
   it('surfaces duplicate task warnings from dashboard submission', async () => {

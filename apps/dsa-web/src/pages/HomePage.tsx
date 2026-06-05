@@ -346,7 +346,7 @@ const HomePage: React.FC = () => {
       await refreshStockBar();
       await refreshHistory(true);
       if (stockCode === 'MARKET') {
-        await refreshMarketReviewHistory(true);
+        await refreshMarketReviewHistory(false);
       }
     } catch {
       // error silently ignored
