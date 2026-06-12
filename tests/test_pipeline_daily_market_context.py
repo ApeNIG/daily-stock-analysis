@@ -28,7 +28,12 @@ def _market_context() -> DailyMarketContext:
 
 def test_pipeline_loads_daily_market_context_when_market_review_enabled() -> None:
     pipeline = StockAnalysisPipeline.__new__(StockAnalysisPipeline)
-    pipeline.config = SimpleNamespace(market_review_enabled=True, report_language="zh")
+    pipeline.config = SimpleNamespace(
+        market_review_enabled=True,
+        daily_market_context_enabled=True,
+        report_language="zh",
+    )
+    pipeline.daily_market_context_enabled = True
     pipeline.db = MagicMock()
     pipeline.notifier = MagicMock()
     pipeline.analyzer = MagicMock()
@@ -60,7 +65,12 @@ def test_pipeline_loads_daily_market_context_when_market_review_enabled() -> Non
 
 def test_pipeline_can_load_daily_market_context_without_runtime_generation() -> None:
     pipeline = StockAnalysisPipeline.__new__(StockAnalysisPipeline)
-    pipeline.config = SimpleNamespace(market_review_enabled=True, report_language="zh")
+    pipeline.config = SimpleNamespace(
+        market_review_enabled=True,
+        daily_market_context_enabled=True,
+        report_language="zh",
+    )
+    pipeline.daily_market_context_enabled = True
     pipeline.db = MagicMock()
     pipeline.notifier = MagicMock()
     pipeline.analyzer = MagicMock()
@@ -83,8 +93,31 @@ def test_pipeline_can_load_daily_market_context_without_runtime_generation() -> 
 
 def test_pipeline_skips_daily_market_context_when_context_is_disabled() -> None:
     pipeline = StockAnalysisPipeline.__new__(StockAnalysisPipeline)
-    pipeline.config = SimpleNamespace(market_review_enabled=True, report_language="zh")
+    pipeline.config = SimpleNamespace(
+        market_review_enabled=True,
+        daily_market_context_enabled=True,
+        report_language="zh",
+    )
     pipeline.daily_market_context_enabled = False
+
+    with patch("src.core.pipeline.DailyMarketContextService") as service_cls:
+        context = pipeline._load_daily_market_context(
+            "cn",
+            target_date=date(2026, 6, 6),
+        )
+
+    assert context is None
+    service_cls.assert_not_called()
+
+
+def test_pipeline_skips_daily_market_context_when_config_is_disabled() -> None:
+    pipeline = StockAnalysisPipeline.__new__(StockAnalysisPipeline)
+    pipeline.config = SimpleNamespace(
+        market_review_enabled=True,
+        daily_market_context_enabled=False,
+        report_language="zh",
+    )
+    pipeline.daily_market_context_enabled = True
 
     with patch("src.core.pipeline.DailyMarketContextService") as service_cls:
         context = pipeline._load_daily_market_context(
@@ -98,7 +131,12 @@ def test_pipeline_skips_daily_market_context_when_context_is_disabled() -> None:
 
 def test_pipeline_initializes_daily_market_context_service_once_across_threads() -> None:
     pipeline = StockAnalysisPipeline.__new__(StockAnalysisPipeline)
-    pipeline.config = SimpleNamespace(market_review_enabled=True, report_language="zh")
+    pipeline.config = SimpleNamespace(
+        market_review_enabled=True,
+        daily_market_context_enabled=True,
+        report_language="zh",
+    )
+    pipeline.daily_market_context_enabled = True
     pipeline.db = MagicMock()
     pipeline.notifier = MagicMock()
     pipeline.analyzer = MagicMock()

@@ -44,6 +44,19 @@ if os.getenv("GITHUB_ACTIONS") != "true" and os.getenv("USE_PROXY", "false").low
     os.environ["http_proxy"] = proxy_url
     os.environ["https_proxy"] = proxy_url
 
+if os.getenv("DSA_PACKAGED_ALPHASIFT_IMPORT_PROBE") == "1":
+    import importlib
+    import sys
+
+    try:
+        importlib.import_module("alphasift.dsa_adapter")
+    except Exception as exc:
+        print(f"ERROR: packaged AlphaSift adapter import failed: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    print("OK: packaged AlphaSift adapter import succeeded")
+    sys.exit(0)
+
 import argparse
 import logging
 import sys
@@ -648,14 +661,18 @@ def run_full_analysis(
             if effective_region is not None
             else (getattr(config, 'market_review_region', 'cn') or 'cn')
         )
-        should_generate_market_context = (
+        should_run_market_review = (
             config.market_review_enabled
             and not args.no_market_review
             and (market_review_region or '') != ''
         )
+        should_use_daily_market_context = (
+            should_run_market_review
+            and getattr(config, 'daily_market_context_enabled', False)
+        )
         analysis_reference_time = datetime.now(timezone.utc)
         daily_market_context_target_date = None
-        if should_generate_market_context:
+        if should_use_daily_market_context:
             daily_market_context_target_date = _resolve_daily_market_context_target_date(
                 market_review_region,
                 analysis_reference_time,
@@ -670,10 +687,10 @@ def run_full_analysis(
             query_id=query_id,
             query_source="cli",
             save_context_snapshot=save_context_snapshot,
-            daily_market_context_enabled=not getattr(args, 'no_market_review', False),
-            daily_market_context_allow_generate=should_generate_market_context,
+            daily_market_context_enabled=should_use_daily_market_context,
+            daily_market_context_allow_generate=should_use_daily_market_context,
         )
-        if should_generate_market_context:
+        if should_use_daily_market_context:
             # Prompt-side context can reuse historical summaries, while full-merge
             # content must avoid silently reusing unrelated historical reports.
             _prime_daily_market_context(
@@ -708,7 +725,7 @@ def run_full_analysis(
             current_time=analysis_reference_time,
         )
 
-        if should_generate_market_context and not market_context_summary:
+        if should_use_daily_market_context and not market_context_summary:
             (
                 market_context_summary,
                 market_context_full_report,
@@ -728,14 +745,19 @@ def run_full_analysis(
         analysis_delay = getattr(config, 'analysis_delay', 0)
 
         # 2. 运行大盘复盘（如果启用且不是仅个股模式）
-        if (
-            config.market_review_enabled
-            and not args.no_market_review
-            and should_generate_market_context
-        ):
-            can_reuse_market_context = _can_reuse_market_context_for_review(
-                market_context_summary,
-                market_review_region,
+        if should_run_market_review:
+            schedule_mode = bool(
+                getattr(args, 'schedule', False)
+                or getattr(config, 'schedule_enabled', False)
+            )
+            review_trigger_source = "schedule" if schedule_mode else "cli"
+            can_reuse_market_context = (
+                _can_reuse_market_context_for_review(
+                    market_context_summary,
+                    market_review_region,
+                )
+                if should_use_daily_market_context
+                else False
             )
 
             can_skip_market_review = (
@@ -765,12 +787,7 @@ def run_full_analysis(
 
             review_result = None
             if not can_skip_market_review:
-                if (
-                    analysis_delay > 0
-                    and config.market_review_enabled
-                    and not args.no_market_review
-                    and should_generate_market_context
-                ):
+                if analysis_delay > 0:
                     logger.info(f"等待 {analysis_delay} 秒后执行大盘复盘（避免API限流）...")
                     time.sleep(analysis_delay)
 
@@ -784,9 +801,10 @@ def run_full_analysis(
                     merge_notification=merge_notification,
                     override_region=market_review_region,
                     query_id=query_id,
+                    trigger_source=review_trigger_source,
                 )
                 # 如果复盘仍未执行成功，再做一次复用历史/缓存读取（防止与并发运行竞态）。
-                if not review_result:
+                if not review_result and should_use_daily_market_context:
                     (
                         market_context_summary,
                         market_context_full_report,
@@ -804,6 +822,8 @@ def run_full_analysis(
                         market_context_summary,
                         market_review_region,
                     )
+                elif not review_result:
+                    can_reuse_market_context = False
 
             # 如果有结果，赋值给 market_report 用于后续飞书文档生成
             if review_result:
@@ -1175,6 +1195,7 @@ def main() -> int:
                 search_service=search_service,
                 send_notification=not args.no_notify,
                 override_region=effective_region,
+                trigger_source="cli",
             )
             return 0
 

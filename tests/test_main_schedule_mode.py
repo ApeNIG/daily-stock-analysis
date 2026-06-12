@@ -92,6 +92,7 @@ class MainScheduleModeTestCase(unittest.TestCase):
             "agent_event_monitor_enabled": False,
             "agent_event_alert_rules_json": "",
             "agent_event_monitor_interval_minutes": 5,
+            "daily_market_context_enabled": False,
         }
         defaults.update(overrides)
         return _DummyConfig(**defaults)
@@ -490,6 +491,7 @@ class MainScheduleModeTestCase(unittest.TestCase):
         config = self._make_config(
             trading_day_check_enabled=False,
             market_review_enabled=True,
+            daily_market_context_enabled=True,
             no_market_review=False,
             single_stock_notify=False,
             merge_email_notification=False,
@@ -530,6 +532,7 @@ class MainScheduleModeTestCase(unittest.TestCase):
         config = self._make_config(
             trading_day_check_enabled=False,
             market_review_enabled=True,
+            daily_market_context_enabled=True,
             single_stock_notify=False,
             merge_email_notification=False,
             analysis_delay=0,
@@ -556,6 +559,37 @@ class MainScheduleModeTestCase(unittest.TestCase):
         run_market_review.assert_not_called()
         refresh.assert_called_once_with(config)
 
+    def test_run_full_analysis_defaults_daily_context_off_without_disabling_market_review(self) -> None:
+        args = self._make_args()
+        config = self._make_config(
+            trading_day_check_enabled=False,
+            market_review_enabled=True,
+            single_stock_notify=False,
+            merge_email_notification=False,
+            analysis_delay=0,
+            database_path=str(Path(self.temp_dir.name) / "stock_analysis.db"),
+        )
+        pipeline = MagicMock()
+        pipeline.run.return_value = []
+        pipeline_kwargs = {}
+
+        def build_pipeline(*args, **kwargs):
+            pipeline_kwargs.update(kwargs)
+            return pipeline
+
+        with patch.object(main, "_refresh_stock_index_cache_for_analysis") as refresh, \
+             patch("main._compute_trading_day_filter", return_value=([], "cn", False)), \
+             patch("src.core.pipeline.StockAnalysisPipeline", side_effect=build_pipeline), \
+             patch("main._prime_daily_market_context") as prime_context, \
+             patch("main._run_market_review_with_shared_lock", return_value=SimpleNamespace(report="大盘复盘")) as run_with_lock:
+            main.run_full_analysis(config, args, [])
+
+        self.assertFalse(pipeline_kwargs["daily_market_context_enabled"])
+        self.assertFalse(pipeline_kwargs["daily_market_context_allow_generate"])
+        prime_context.assert_not_called()
+        run_with_lock.assert_called_once()
+        refresh.assert_called_once_with(config)
+
     def test_run_full_analysis_primes_daily_market_context_before_stock_analysis(self) -> None:
         args = self._make_args()
         target_date = date(2026, 3, 26)
@@ -563,6 +597,7 @@ class MainScheduleModeTestCase(unittest.TestCase):
         config = self._make_config(
             trading_day_check_enabled=False,
             market_review_enabled=True,
+            daily_market_context_enabled=True,
             single_stock_notify=False,
             merge_email_notification=False,
             analysis_delay=0,
@@ -631,6 +666,7 @@ class MainScheduleModeTestCase(unittest.TestCase):
             trading_day_check_enabled=True,
             market_review_region="both",
             market_review_enabled=True,
+            daily_market_context_enabled=True,
             single_stock_notify=False,
             merge_email_notification=False,
             analysis_delay=0,
@@ -776,6 +812,7 @@ class MainScheduleModeTestCase(unittest.TestCase):
         config = self._make_config(
             trading_day_check_enabled=False,
             market_review_enabled=True,
+            daily_market_context_enabled=True,
             single_stock_notify=False,
             merge_email_notification=False,
             analysis_delay=0,
@@ -843,6 +880,7 @@ class MainScheduleModeTestCase(unittest.TestCase):
         config = self._make_config(
             trading_day_check_enabled=False,
             market_review_enabled=True,
+            daily_market_context_enabled=True,
             single_stock_notify=False,
             merge_email_notification=False,
             analysis_delay=0,
@@ -914,6 +952,7 @@ class MainScheduleModeTestCase(unittest.TestCase):
         config = self._make_config(
             trading_day_check_enabled=False,
             market_review_enabled=True,
+            daily_market_context_enabled=True,
             single_stock_notify=False,
             merge_email_notification=False,
             analysis_delay=0,
@@ -975,6 +1014,7 @@ class MainScheduleModeTestCase(unittest.TestCase):
         config = self._make_config(
             trading_day_check_enabled=False,
             market_review_enabled=True,
+            daily_market_context_enabled=True,
             single_stock_notify=False,
             merge_email_notification=False,
             analysis_delay=2,
@@ -1055,6 +1095,7 @@ class MainScheduleModeTestCase(unittest.TestCase):
         config = self._make_config(
             trading_day_check_enabled=False,
             market_review_enabled=True,
+            daily_market_context_enabled=True,
             single_stock_notify=False,
             merge_email_notification=True,
             analysis_delay=0,
@@ -1131,6 +1172,7 @@ class MainScheduleModeTestCase(unittest.TestCase):
         config = self._make_config(
             trading_day_check_enabled=False,
             market_review_enabled=True,
+            daily_market_context_enabled=True,
             single_stock_notify=False,
             merge_email_notification=False,
             analysis_delay=0,
@@ -1199,6 +1241,37 @@ class MainScheduleModeTestCase(unittest.TestCase):
         self.assertFalse(get_context_kwargs["allow_generate"])
         self.assertFalse(get_context_kwargs["persist_market_review_history"])
 
+    def test_config_enabled_schedule_marks_market_review_source_as_schedule(self) -> None:
+        args = self._make_args(schedule=False)
+        target_date = date(2026, 3, 26)
+        config = self._make_config(
+            schedule_enabled=True,
+            trading_day_check_enabled=False,
+            market_review_enabled=True,
+            no_market_review=False,
+            single_stock_notify=False,
+            merge_email_notification=False,
+            analysis_delay=0,
+            database_path=str(Path(self.temp_dir.name) / "stock_analysis.db"),
+        )
+        pipeline = MagicMock()
+        pipeline.run.return_value = []
+
+        with patch.object(main, "_refresh_stock_index_cache_for_analysis"), \
+             patch.object(main, "_compute_trading_day_filter", return_value=(["600519"], "cn", False)), \
+             patch("main._resolve_daily_market_context_target_date", return_value=target_date), \
+             patch("src.core.pipeline.StockAnalysisPipeline", return_value=pipeline), \
+             patch("main._prime_daily_market_context", return_value=("", "")), \
+             patch("main._run_market_review_with_shared_lock", return_value="market report") as run_with_lock, \
+             patch("src.core.market_review.run_market_review") as run_market_review:
+            main.run_full_analysis(config, args, ["600519"])
+
+        pipeline.run.assert_called_once()
+        run_with_lock.assert_called_once()
+        call_args = run_with_lock.call_args
+        self.assertIs(call_args.args[1], run_market_review)
+        self.assertEqual(call_args.kwargs["trigger_source"], "schedule")
+
     def test_market_review_mode_uses_shared_runtime_assembly(self) -> None:
         args = self._make_args(market_review=True)
         config = self._make_config(
@@ -1240,6 +1313,7 @@ class MainScheduleModeTestCase(unittest.TestCase):
         self.assertTrue(call_args.kwargs["send_notification"])
         self.assertNotIn("merge_notification", call_args.kwargs)
         self.assertEqual(call_args.kwargs["override_region"], "cn,us")
+        self.assertEqual(call_args.kwargs["trigger_source"], "cli")
 
     def test_bootstrap_logging_persists_when_config_load_fails(self) -> None:
         """Config load failure must be logged to stderr and return exit code 1.
