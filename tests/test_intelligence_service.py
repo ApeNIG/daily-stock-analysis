@@ -14,7 +14,7 @@ from unittest.mock import Mock, patch
 from src.config import Config
 from src.repositories.intelligence_repo import IntelligenceRepository
 from src.services.intelligence_service import IntelligenceService, IntelligenceServiceError
-from src.storage import DatabaseManager, IntelligenceItem
+from src.storage import DatabaseManager, IntelligenceItem, INTELLIGENCE_ITEM_NULL_SCOPE_VALUE
 
 RSS_FIXTURE = b'<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0"><channel>\n<item><title>Policy support lifts AI supply chain</title><link>https://news.example.com/a</link><description>Market-level catalyst with evidence link.</description><pubDate>Wed, 17 Jun 2026 08:00:00 GMT</pubDate></item>\n<item><title>Second item</title><link>https://news.example.com/b</link><description>Second summary.</description></item>\n</channel></rss>'
 NO_URL_LINK_FIXTURE = b'<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0"><channel>\n<item><title>Anonymous item</title><description>No link in this item.</description></item>\n</channel></rss>'
@@ -227,7 +227,7 @@ class IntelligenceServiceTestCase(unittest.TestCase):
         rows, total = IntelligenceRepository().list_items()
         self.assertEqual(total, 4)
         scope_pairs = {(row.scope_type, row.scope_value) for row in rows}
-        self.assertIn(("market", None), scope_pairs)
+        self.assertIn(("market", INTELLIGENCE_ITEM_NULL_SCOPE_VALUE), scope_pairs)
         self.assertIn(("symbol", "600519"), scope_pairs)
 
     def test_redirect_to_private_network_is_blocked(self) -> None:

@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [改进] #1390 P3 为 `DecisionSignal` 补齐默认生命周期、同源窄 relaxed 去重、相反 active 信号自动 invalidated、terminal 状态不可 PATCH 复活和自动提取低敏 market phase hints，保持 API 响应 schema 不变。
 - [新功能] #1390 P4 新增 Web AI 建议页、持仓页最新 active 信号摘要和历史报告提取信号展示，复用既有 DecisionSignal API 且不新增后端契约或配置项。
 - [修复] #1390 P4 修复 Web AI 建议页筛选/状态更新分页、价格计划单边入场价展示、持仓 latest 信号刷新、详情 JSON 安全渲染和卡片交互语义问题。
+- [新功能] #1390 P5 新增 DecisionSignal 用户反馈、信号级日线后验评估、统计 API 与 Web 展示，使用 outcome/feedback sidecar 表并保留主信号表契约；默认后验重跑会恢复可补齐行情数据的 unable 结果，批量 backfill 不再被最新已评估信号占满 limit。
 - [修复] #1390 收紧建议动作 legacy fallback：英文 `not to ...` 与 `avoid selling/reducing/trimming ...` 等否定/回避表达不再误判为买卖动作，Web 旧记录不再把中文金融上下文、`buy or sell`、多 guard 歧义文本或 `buyback` / `buy-back` / `buy back` / `selloff` / `sell-off` / `sell off` 等英文复合词渲染成 action badge，并在有结构化 `action` 时让回测/历史趋势等入口按界面语言显示 action 标签。
 - [改进] 完善运行时日志上下文，补充 logger name、触发来源、市场统计与实时行情预取链路状态，便于排查调度、API、Bot 和数据源降级路径。
 - [改进] #1595 P0a 新增 legacy LLM usage provider/cache telemetry 与 message HMAC 诊断字段，保持 prompt、provider 请求参数、fallback 与用量 summary API 行为不变。
@@ -41,8 +42,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [改进] #1707 个股分析、Agent 分析和大盘复盘会 fail-open 读取本地资讯/情报池，并把来源链接作为新闻上下文和 evidence 输入。
 - [改进] #1707 补齐内置 RSS/Atom 资讯源模板后端入口，修复本地资讯拉取的 requests 参数兼容、请求阶段 DNS 校验、共享地址段拒绝、坏条目跳过与港股短代码匹配。
 - [文档] #1707 阐明情报池接入仅追加本地资讯消费，不改模型名/provider/base URL/默认模型策略/回退策略/保存前清理逻辑或运行时配置迁移；结构化风险提示若出现为关键词误报；回滚可采用 `revert` 本 PR 或停用/移除本地资讯接入入口与数据。
+- [文档] 本次 #1707 情报源基线仅新增 `NEWS_INTEL_*` 配置，不变更 LITELLM / ANSPIRE / Base URL / provider/model 清理与回退语义；回退策略为移除或禁用这三项情报源变量后恢复既有 LLM 配置行为。
 
 - [新功能] 个股分析历史成功保存后会从最终报告 best-effort 提取 `DecisionSignal` 决策信号，复用现有信号去重、计划质量计算和脱敏契约。
+- [改进] 问股页移动端策略选择改为默认收起的按钮入口，展开后仍可多选策略并在发送后自动收起，减少对对话内容的遮挡。
+
 
 ## [3.22.0] - 2026-06-13
 

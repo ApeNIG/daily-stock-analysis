@@ -22,7 +22,7 @@ from sqlalchemy.exc import IntegrityError
 
 from src.config import get_config
 from src.repositories.intelligence_repo import IntelligenceRepository
-from src.storage import IntelligenceSource
+from src.storage import IntelligenceSource, INTELLIGENCE_ITEM_NULL_SCOPE_VALUE
 from src.services.run_diagnostics import sanitize_diagnostic_text
 
 logger = logging.getLogger(__name__)
@@ -495,7 +495,9 @@ class IntelligenceService:
             "published_at": IntelligenceService._iso(item.published_at),
             "fetched_at": IntelligenceService._iso(item.fetched_at),
             "scope_type": item.scope_type,
-            "scope_value": item.scope_value,
+            "scope_value": None if (
+                item.scope_type == "market" and item.scope_value == INTELLIGENCE_ITEM_NULL_SCOPE_VALUE
+            ) else item.scope_value,
             "market": item.market,
         }
 

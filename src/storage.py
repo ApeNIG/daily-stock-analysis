@@ -61,6 +61,7 @@ from src.utils.sniper_points import extract_sniper_points, parse_sniper_value
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
 CURRENT_SCHEMA_VERSION = "2026-06-05-create-all-baseline"
+INTELLIGENCE_ITEM_NULL_SCOPE_VALUE = "__dsa_null_scope__"
 
 # SQLAlchemy ORM 基类
 Base = declarative_base()
@@ -248,23 +249,23 @@ class IntelligenceItem(Base):
     source_type = Column(String(32), nullable=False, default='rss', index=True)
     title = Column(String(300), nullable=False)
     summary = Column(Text)
-    url = Column(String(1000), nullable=False)
+    url = Column(String(1000), nullable=False, index=True)
     source = Column(String(100))
     published_at = Column(DateTime, index=True)
     fetched_at = Column(DateTime, default=datetime.now, index=True)
     scope_type = Column(String(32), nullable=False, default='market', index=True)
-    scope_value = Column(String(64), index=True)
+    scope_value = Column(String(64), nullable=False, default=INTELLIGENCE_ITEM_NULL_SCOPE_VALUE, index=True)
     market = Column(String(32), nullable=False, default='cn', index=True)
     raw_payload = Column(Text)
 
     __table_args__ = (
         UniqueConstraint(
-            "source_id",
-            "scope_type",
-            "scope_value",
-            "market",
-            "url",
-            name="uix_intel_item_scope",
+            'source_id',
+            'url',
+            'scope_type',
+            'scope_value',
+            'market',
+            name='uix_intel_item_source_scope_url',
         ),
         Index('ix_intel_item_scope_time', 'scope_type', 'scope_value', 'market', 'published_at'),
         Index('ix_intel_item_fetch_time', 'fetched_at'),
@@ -994,6 +995,62 @@ class DecisionSignalRecord(Base):
     )
 
 
+class DecisionSignalOutcomeRecord(Base):
+    """Signal-level forward outcome for Issue #1390 P5."""
+
+    __tablename__ = 'decision_signal_outcomes'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    signal_id = Column(Integer, nullable=False, index=True)
+    horizon = Column(String(16), nullable=False, index=True)
+    engine_version = Column(String(32), nullable=False, index=True)
+    eval_status = Column(String(24), nullable=False, default='unable', index=True)
+    outcome = Column(String(16), index=True)
+    direction_expected = Column(String(16), index=True)
+    direction_correct = Column(Boolean)
+    unable_reason = Column(String(64), index=True)
+    anchor_date = Column(Date, index=True)
+    eval_window_days = Column(Integer)
+    start_price = Column(Float)
+    end_close = Column(Float)
+    max_high = Column(Float)
+    min_low = Column(Float)
+    stock_return_pct = Column(Float)
+
+    action = Column(String(16), index=True)
+    market = Column(String(8), index=True)
+    market_phase = Column(String(24), index=True)
+    source_type = Column(String(32), index=True)
+    source_agent = Column(String(64), index=True)
+    plan_quality = Column(String(16), index=True)
+    data_quality_level = Column(String(24), index=True)
+    holding_state = Column(String(16), nullable=False, default='unknown', index=True)
+
+    created_at = Column(DateTime, default=utc_naive_now, index=True)
+    updated_at = Column(DateTime, default=utc_naive_now, onupdate=utc_naive_now, index=True)
+
+    __table_args__ = (
+        UniqueConstraint('signal_id', 'horizon', 'engine_version', name='uix_decision_signal_outcome_key'),
+        Index('ix_decision_signal_outcome_stats_action', 'engine_version', 'action', 'horizon'),
+        Index('ix_decision_signal_outcome_stats_market', 'engine_version', 'market', 'horizon'),
+    )
+
+
+class DecisionSignalFeedbackRecord(Base):
+    """Latest user feedback for a decision signal."""
+
+    __tablename__ = 'decision_signal_feedback'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    signal_id = Column(Integer, nullable=False, unique=True, index=True)
+    feedback_value = Column(String(16), nullable=False, index=True)
+    reason_code = Column(String(64), index=True)
+    note = Column(Text)
+    source = Column(String(16), nullable=False, default='api', index=True)
+    created_at = Column(DateTime, default=utc_naive_now, index=True)
+    updated_at = Column(DateTime, default=utc_naive_now, onupdate=utc_naive_now, index=True)
+
+
 class _DatabaseManagerMeta(type):
     """Serialize DatabaseManager construction across __new__ and __init__."""
 
@@ -1075,6 +1132,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             # 创建所有表
             Base.metadata.create_all(self._engine)
             self._ensure_llm_usage_telemetry_columns()
+            self._ensure_intelligence_item_scope_values()
             self._ensure_schema_migration_record()
             self._ensure_intelligence_items_unique_index()
 
@@ -1265,6 +1323,31 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                             time.sleep(delay)
                         continue
                     raise
+
+    def _ensure_intelligence_item_scope_values(self) -> None:
+        """Backfill nullable intelligence item scopes so SQLite unique keys work."""
+        if not self._is_sqlite_engine:
+            return
+        try:
+            existing = {
+                column["name"]
+                for column in inspect(self._engine).get_columns(IntelligenceItem.__tablename__)
+            }
+        except Exception as exc:
+            logger.warning("资讯池 scope_value 回填检查失败，已跳过: %s", exc)
+            return
+        if "scope_value" not in existing:
+            return
+        try:
+            with self._engine.begin() as connection:
+                connection.exec_driver_sql(
+                    f"UPDATE {IntelligenceItem.__tablename__} "
+                    "SET scope_value = ? "
+                    "WHERE scope_value IS NULL OR scope_value = ''",
+                    (INTELLIGENCE_ITEM_NULL_SCOPE_VALUE,),
+                )
+        except Exception as exc:
+            logger.warning("资讯池 scope_value 回填失败，已跳过: %s", exc)
 
     @classmethod
     def get_instance(cls) -> 'DatabaseManager':
@@ -2059,14 +2142,30 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             if not existing_ids:
                 return 0
 
-            session.execute(
-                delete(DecisionSignalRecord).where(
-                    and_(
-                        DecisionSignalRecord.source_type == "analysis",
-                        DecisionSignalRecord.source_report_id.in_(existing_ids),
+            linked_signal_ids = sorted(
+                session.execute(
+                    select(DecisionSignalRecord.id).where(
+                        and_(
+                            DecisionSignalRecord.source_type == "analysis",
+                            DecisionSignalRecord.source_report_id.in_(existing_ids),
+                        )
+                    )
+                ).scalars().all()
+            )
+            if linked_signal_ids:
+                session.execute(
+                    delete(DecisionSignalOutcomeRecord).where(
+                        DecisionSignalOutcomeRecord.signal_id.in_(linked_signal_ids)
                     )
                 )
-            )
+                session.execute(
+                    delete(DecisionSignalFeedbackRecord).where(
+                        DecisionSignalFeedbackRecord.signal_id.in_(linked_signal_ids)
+                    )
+                )
+                session.execute(
+                    delete(DecisionSignalRecord).where(DecisionSignalRecord.id.in_(linked_signal_ids))
+                )
             session.execute(
                 delete(BacktestResult).where(BacktestResult.analysis_history_id.in_(existing_ids))
             )
