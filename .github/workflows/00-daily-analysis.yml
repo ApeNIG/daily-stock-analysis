@@ -496,6 +496,13 @@ jobs:
             python main.py $FORCE_RUN_ARG
           fi
       
+      - name: Send Telegram digest
+        if: success()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python scripts/telegram_digest.py
+
       - name: 上传分析报告
         uses: actions/upload-artifact@v6
         if: always()
