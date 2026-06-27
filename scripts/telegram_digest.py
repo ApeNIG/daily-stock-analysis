@@ -153,6 +153,24 @@ def send_telegram(text: str):
         print(f"Telegram error: {r.status_code} {r.text}")
 
 
+def export_snapshot(analyses: list[dict], target_date: str):
+    """Export a JSON snapshot for correlation tracking."""
+    snapshot = {
+        "date": target_date,
+        "scores": {a["code"]: {
+            "score": a["sentiment_score"],
+            "advice": a["operation_advice"],
+            "trend": a["trend_prediction"],
+        } for a in analyses}
+    }
+    out_dir = Path(__file__).parent.parent / "reports"
+    out_dir.mkdir(exist_ok=True)
+    out_path = out_dir / f"dsa_snapshot_{target_date}.json"
+    with open(out_path, "w") as f:
+        json.dump(snapshot, f, indent=2)
+    print(f"Snapshot exported: {out_path}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="DSA Telegram Digest")
     parser.add_argument("--date", default=date.today().isoformat(), help="Analysis date (YYYY-MM-DD)")
@@ -164,6 +182,10 @@ def main():
 
     print(digest)
     print(f"\n--- {len(digest)} chars ---")
+
+    # Always export snapshot for correlation tracking
+    if analyses:
+        export_snapshot(analyses, args.date)
 
     if not args.dry_run:
         send_telegram(digest)
